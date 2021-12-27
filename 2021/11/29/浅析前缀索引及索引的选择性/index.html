@@ -16,13 +16,15 @@
   <meta name="description" content="">
   <meta name="author" content="John Doe">
   <meta name="keywords" content="">
-  <meta property="og:type" content="article">
+  <meta name="description" content="有时候需要对一个很长的字符串添加索引，那么如何给长字符串添加索引呢？索引整个字符串？这样会让索引不但变得很大，而且会很慢，会大大降低检索性能。那使用hash索引呢？hash索引也可以考虑，但考虑到hash索引使用场景的局限性，有时候这么做并不够，那有什么好的方法对长字符串添加索引呢？ 我们可以对截取字符串的部分构件索引，这样在查询的时候会更加灵活，而且会大大节省空间，提高检索的效率。但我们在实践中">
+<meta property="og:type" content="article">
 <meta property="og:title" content="浅析前缀索引及索引的选择性">
 <meta property="og:url" content="http://example.com/2021/11/29/%E6%B5%85%E6%9E%90%E5%89%8D%E7%BC%80%E7%B4%A2%E5%BC%95%E5%8F%8A%E7%B4%A2%E5%BC%95%E7%9A%84%E9%80%89%E6%8B%A9%E6%80%A7/index.html">
 <meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="有时候需要对一个很长的字符串添加索引，那么如何给长字符串添加索引呢？索引整个字符串？这样会让索引不但变得很大，而且会很慢，会大大降低检索性能。那使用hash索引呢？hash索引也可以考虑，但考虑到hash索引使用场景的局限性，有时候这么做并不够，那有什么好的方法对长字符串添加索引呢？ 我们可以对截取字符串的部分构件索引，这样在查询的时候会更加灵活，而且会大大节省空间，提高检索的效率。但我们在实践中">
 <meta property="og:locale" content="zh_CN">
 <meta property="article:published_time" content="2021-11-29T14:01:03.000Z">
-<meta property="article:modified_time" content="2021-11-29T14:01:03.809Z">
+<meta property="article:modified_time" content="2021-12-27T14:31:18.008Z">
 <meta property="article:author" content="John Doe">
 <meta name="twitter:card" content="summary_large_image">
   
@@ -193,7 +195,7 @@
   
     <span class="post-meta mr-2">
       <i class="iconfont icon-chart"></i>
-      0 字
+      2.6k 字
     </span>
   
 
@@ -202,7 +204,7 @@
       <i class="iconfont icon-clock-fill"></i>
       
       
-      1 分钟
+      8 分钟
     </span>
   
 
@@ -234,7 +236,229 @@
             <h1 style="display: none">浅析前缀索引及索引的选择性</h1>
             
             <div class="markdown-body">
-              
+              <p>有时候需要对一个很长的字符串添加索引，那么如何给长字符串添加索引呢？索引整个字符串？这样会让索引不但变得很大，而且会很慢，会大大降低检索性能。那使用hash索引呢？hash索引也可以考虑，但考虑到hash索引使用场景的局限性，有时候这么做并不够，那有什么好的方法对长字符串添加索引呢？</p>
+<p>我们可以对截取字符串的部分构件索引，这样在查询的时候会更加灵活，而且会大大节省空间，提高检索的效率。但我们在实践中需要考虑的一个问题是，我们选取字符串的部分长度在什么区间作为索引会比较合理呢？这就不得不引入一个概念：索引的选择性。实际上前缀索引会降低索引的选择性。</p>
+<p>所谓索引的选择性是指，不重复的索引值（也称为基数）和数据表的记录总数（#T）的比值，范围从1/#T到1之间。索引的选择性越高则查询效率越高，因为选择性高的索引可以让MySQL在查找时过滤掉更多的行。唯一索引的选择性是1，这是最好的索引选择性，性能也是最好的。</p>
+<p>选择前缀索引的诀窍在于要选择合适的前缀以保证较高的选择性，同时还不能太长，占用太多的空间。前缀索引应该足够长，以使得前缀索引的选择性接近于索引整个列。</p>
+<p>下载以下sql文件我们用实验来说明索引的选择性</p>
+<p><a href="%E4%B8%8B%E8%BD%BD%E5%AE%9E%E9%AA%8C%E6%89%80%E7%94%A8%E7%9A%84sql%E6%96%87%E4%BB%B6">https://downloads.mysql.com/docs/sakila-db.zip</a></p>
+<p>用city表生成一个示例表</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><code class="hljs pgsql"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> sakila.city_demo(city <span class="hljs-type">VARCHAR</span>(<span class="hljs-number">50</span>) <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">NULL</span>);<br>    <span class="hljs-keyword">INSERT</span> <span class="hljs-keyword">INTO</span> sakila.city_demo(city) <span class="hljs-keyword">SELECT</span> city <span class="hljs-keyword">FROM</span> sakila.city;<br>    <span class="hljs-keyword">UPDATE</span> sakila.city_demo<br>       <span class="hljs-keyword">SET</span> city = (<span class="hljs-keyword">SELECT</span> city <span class="hljs-keyword">FROM</span> sakila.city <span class="hljs-keyword">ORDER</span> <span class="hljs-keyword">BY</span> RAND() <span class="hljs-keyword">LIMIT</span> <span class="hljs-number">1</span>);<br></code></pre></td></tr></table></figure>
+
+<p>生成的数据都是随机的，运行下面的sql语句我们查询出最常见的城市列表：</p>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><code class="hljs n1ql"><span class="hljs-keyword">select</span> <span class="hljs-built_in">COUNT</span>(*) <span class="hljs-keyword">as</span> cnt,city<br><span class="hljs-keyword">from</span> sakila.city_demo <span class="hljs-keyword">GROUP</span> <span class="hljs-keyword">BY</span> city <span class="hljs-keyword">ORDER</span> <span class="hljs-keyword">BY</span> cnt <span class="hljs-keyword">DESC</span> <span class="hljs-keyword">LIMIT</span> <span class="hljs-number">10</span>;<br></code></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>cnt</th>
+<th>city</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>97</td>
+<td>London</td>
+</tr>
+<tr>
+<td>70</td>
+<td>Matamoros</td>
+</tr>
+<tr>
+<td>68</td>
+<td>Ourense (Orense)</td>
+</tr>
+<tr>
+<td>68</td>
+<td>Greensboro</td>
+</tr>
+<tr>
+<td>67</td>
+<td>Iwaki</td>
+</tr>
+<tr>
+<td>66</td>
+<td>Konotop</td>
+</tr>
+<tr>
+<td>66</td>
+<td>Guadalajara</td>
+</tr>
+<tr>
+<td>66</td>
+<td>Katihar</td>
+</tr>
+<tr>
+<td>65</td>
+<td>Kuching</td>
+</tr>
+<tr>
+<td>64</td>
+<td>Usak</td>
+</tr>
+</tbody></table>
+<p>现在查找到最频繁出现的城市前缀，先从三个字母开始，运行以下sql语句：</p>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><code class="hljs n1ql"><span class="hljs-keyword">select</span> <span class="hljs-built_in">COUNT</span>(*) <span class="hljs-keyword">as</span> cnt,<span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">3</span>) <span class="hljs-keyword">as</span> pref<br><span class="hljs-keyword">from</span> sakila.city_demo <span class="hljs-keyword">GROUP</span> <span class="hljs-keyword">BY</span> pref <span class="hljs-keyword">ORDER</span> <span class="hljs-keyword">BY</span> cnt <span class="hljs-keyword">DESC</span> <span class="hljs-keyword">LIMIT</span> <span class="hljs-number">10</span>;<br></code></pre></td></tr></table></figure>
+
+<p>结果如下：</p>
+<table>
+<thead>
+<tr>
+<th align="center">cnt</th>
+<th>pref</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">681</td>
+<td>San</td>
+</tr>
+<tr>
+<td align="center">297</td>
+<td>Cha</td>
+</tr>
+<tr>
+<td align="center">275</td>
+<td>Sou</td>
+</tr>
+<tr>
+<td align="center">266</td>
+<td>al-</td>
+</tr>
+<tr>
+<td align="center">246</td>
+<td>Sal</td>
+</tr>
+<tr>
+<td align="center">238</td>
+<td>Tan</td>
+</tr>
+<tr>
+<td align="center">210</td>
+<td>Sha</td>
+</tr>
+<tr>
+<td align="center">201</td>
+<td>Bat</td>
+</tr>
+<tr>
+<td align="center">199</td>
+<td>Hal</td>
+</tr>
+<tr>
+<td align="center">199</td>
+<td>Val</td>
+</tr>
+</tbody></table>
+<p>每个前缀都比原来的城市出现的次数更多，因此唯一前缀比唯一城市要少得多。然后我们增加前缀长度，直到这个前缀的选择性接近完整列的选择性。经过实验后发现前缀长度为7时比较合适：</p>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><code class="hljs n1ql"><span class="hljs-keyword">select</span> <span class="hljs-built_in">COUNT</span>(*) <span class="hljs-keyword">as</span> cnt,<span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">7</span>) <span class="hljs-keyword">as</span> pref<br><span class="hljs-keyword">from</span> sakila.city_demo <span class="hljs-keyword">GROUP</span> <span class="hljs-keyword">BY</span> pref <span class="hljs-keyword">ORDER</span> <span class="hljs-keyword">BY</span> cnt <span class="hljs-keyword">DESC</span> <span class="hljs-keyword">LIMIT</span> <span class="hljs-number">10</span>;<br></code></pre></td></tr></table></figure>
+
+<p>查询结果为：</p>
+<table>
+<thead>
+<tr>
+<th align="center">cnt</th>
+<th>pref</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">108</td>
+<td>Valle d</td>
+</tr>
+<tr>
+<td align="center">102</td>
+<td>Santiag</td>
+</tr>
+<tr>
+<td align="center">97</td>
+<td>London</td>
+</tr>
+<tr>
+<td align="center">90</td>
+<td>San Fel</td>
+</tr>
+<tr>
+<td align="center">70</td>
+<td>Matamor</td>
+</tr>
+<tr>
+<td align="center">68</td>
+<td>Ourense</td>
+</tr>
+<tr>
+<td align="center">68</td>
+<td>Greensb</td>
+</tr>
+<tr>
+<td align="center">67</td>
+<td>Iwaki</td>
+</tr>
+<tr>
+<td align="center">66</td>
+<td>Katihar</td>
+</tr>
+<tr>
+<td align="center">66</td>
+<td>Konotop</td>
+</tr>
+</tbody></table>
+<p>计算合适的前缀长度的另外一个办法就是计算完整列的选择性，并使前缀的选择性接近于完整列的选择性。运行以下sql语句计算列的选择性：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs sql"><span class="hljs-keyword">select</span> <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> city)<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">FROM</span> sakila.city_demo;<br></code></pre></td></tr></table></figure>
+
+<p>结果如下：</p>
+<table>
+<thead>
+<tr>
+<th align="center">COUNT(DISTINCT city)/COUNT(*)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">0.02</td>
+</tr>
+</tbody></table>
+<p>通常来说，这个例子中如果前缀的选择性能够接近0.2，基本上就可用了。</p>
+<p>下面的sql语句给出了如何在同一个查询中计算不同前缀长度的选择性：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><code class="hljs sql"><span class="hljs-keyword">select</span> <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> city)<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal, <br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">3</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal3,<br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">4</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal4,<br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">5</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal5, <br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">6</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal6, <br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">7</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal7, <br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">8</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal8, <br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">9</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal9, <br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">10</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal10,<br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">11</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal11,<br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">12</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal12, <br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">13</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal13, <br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">14</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal14, <br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">15</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal15,  <br>			 <span class="hljs-built_in">COUNT</span>(<span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">LEFT</span>(city,<span class="hljs-number">16</span>))<span class="hljs-operator">/</span><span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">as</span> sal16 <br>			 <span class="hljs-keyword">FROM</span> sakila.city_demo;<br></code></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>sal</th>
+<th>sal3</th>
+<th>sal4</th>
+<th>sal5</th>
+<th>sal6</th>
+<th>sal7</th>
+<th>sal8</th>
+<th>sal9</th>
+<th>sal10</th>
+<th>sal11</th>
+<th>sal12</th>
+<th>sal13</th>
+<th>sal14</th>
+<th>sal15</th>
+<th>sal16</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0.02</td>
+<td>0.0153</td>
+<td>0.0188</td>
+<td>0.0195</td>
+<td>0.0198</td>
+<td>0.0199</td>
+<td>0.0199</td>
+<td>0.0199</td>
+<td>0.0199</td>
+<td>0.0199</td>
+<td>0.0199</td>
+<td>0.0199</td>
+<td>0.02</td>
+<td>0.02</td>
+<td>0.02</td>
+</tr>
+</tbody></table>
+<p>查询显示当前缀长度到达7的时候，再增加前缀长度，选择性提升的幅度已经很小了。</p>
+<p>需要注意的是只看平均选择性是不够的，也有例外的情况，需要考虑最坏情况下的选择性。平均选择性会让你认为前缀长度为4或者5的索引已经足够了，但如果数据分布很不均匀，可能就会有陷阱。</p>
+
             </div>
             <hr>
             <div>
